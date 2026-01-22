@@ -5,6 +5,31 @@ const { calculateDistance, getCoordinatesFromLink } = require('../utils/distance
 
 const { Product, Offer, Store, Brand } = models;
 
+function parseStorageLifeDays(storageLife) {
+  if (!storageLife) return null;
+  const raw = String(storageLife).trim().toLowerCase();
+  const match = raw.match(/(\d+(?:[.,]\d+)?)/);
+  if (!match) return null;
+  const value = Number(match[1].replace(',', '.'));
+  if (Number.isNaN(value) || value <= 0) return null;
+
+  if (raw.includes('нед')) return Math.round(value * 7);
+  if (raw.includes('мес')) return Math.round(value * 30);
+  if (raw.includes('год') || raw.includes('лет')) return Math.round(value * 365);
+  if (raw.includes('д')) return Math.round(value);
+
+  return Math.round(value);
+}
+
+function calculateExpirationDate(productionDate, storageLife) {
+  if (!productionDate || !storageLife) return null;
+  const storageDays = parseStorageLifeDays(storageLife);
+  if (!storageDays) return null;
+  const expirationDate = new Date(productionDate);
+  expirationDate.setDate(expirationDate.getDate() + storageDays);
+  return expirationDate;
+}
+
 async function createProduct(req, res) {
   try {
     const {
@@ -45,6 +70,8 @@ async function createProduct(req, res) {
       return res.status(400).json({ error: 'Некорректная дата изготовления' });
     }
 
+    const expirationDate = calculateExpirationDate(parsedProductionDate, storageLife);
+
     const product = await Product.create({
       id: generateId(),
       name,
@@ -58,6 +85,7 @@ async function createProduct(req, res) {
       // Поля для карточек товаров бренда
       storageLife: storageLife || null,
       productionDate: parsedProductionDate,
+      expirationDate,
       allergens: allergens || null,
       ageRestrictions: ageRestrictions || null
     });
@@ -151,6 +179,11 @@ async function updateProduct(req, res) {
       ageRestrictions
     } = req.body;
 
+    const existingProduct = await Product.findOne({ id: productId }).lean();
+    if (!existingProduct) {
+      return res.status(404).json({ error: 'Товар не найден' });
+    }
+
     const update = { updatedAt: new Date() };
     if (name !== undefined) update.name = name;
     if (description !== undefined) update.description = description;
@@ -175,6 +208,14 @@ async function updateProduct(req, res) {
     if (allergens !== undefined) update.allergens = allergens;
     if (ageRestrictions !== undefined) update.ageRestrictions = ageRestrictions;
 
+    if (storageLife !== undefined || productionDate !== undefined) {
+      const resolvedProductionDate =
+        productionDate !== undefined ? update.productionDate : existingProduct.productionDate;
+      const resolvedStorageLife =
+        storageLife !== undefined ? update.storageLife : existingProduct.storageLife;
+      update.expirationDate = calculateExpirationDate(resolvedProductionDate, resolvedStorageLife);
+    }
+
     // Обновление brandId
     if (brandId !== undefined) {
       const brand = await Brand.findOne({ id: brandId }).lean();
@@ -188,9 +229,6 @@ async function updateProduct(req, res) {
     const product = await Product.findOneAndUpdate({ id: productId }, update, {
       new: true
     }).lean();
-    if (!product) {
-      return res.status(404).json({ error: 'Товар не найден' });
-    }
 
     res.json(product);
   } catch (error) {

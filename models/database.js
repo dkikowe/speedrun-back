@@ -161,6 +161,7 @@ const productSchema = new mongoose.Schema(
     // Поля для карточек товаров бренда
     storageLife: { type: String, required: true },
     productionDate: { type: Date, required: true },
+    expirationDate: { type: Date, default: null },
     allergens: { type: String, default: null },
     ageRestrictions: { type: String, default: null }
   },
